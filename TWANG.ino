@@ -556,6 +556,18 @@ void spawnEnemy(int pos, int dir, int sp, int wobble){
     }
 }
 
+void spawnMarkedEnemy(int pos, int dir, int sp, int wobble, int ownerIndex) {
+    for(int e = 0; e < enemyCount; e++){
+        if(!enemyPool[e].Alive()){
+            enemyPool[e].Spawn(pos, dir, sp, wobble);
+            enemyPool[e].playerSide = pos > players[0].position ? 1 : -1;
+            enemyPool[e].isMarked   = true;
+            enemyPool[e].ownerIndex = ownerIndex;
+            return;
+        }
+    }
+}
+
 void spawnLava(int left, int right, int ontime, int offtime, int offset, char* state){
     for(int i = 0; i<lavaCount; i++){
         if(!lavaPool[i].Alive()){
@@ -569,6 +581,15 @@ void spawnConveyor(int startPoint, int endPoint, int dir){
     for(int i = 0; i<conveyorCount; i++){
         if(!conveyorPool[i]._alive){
             conveyorPool[i].Spawn(startPoint, endPoint, dir);
+            return;
+        }
+    }
+}
+
+void spawnSpawner(int pos, int rate, int sp, int dir, long activate) {
+    for(int s = 0; s < spawnCount; s++){
+        if(!spawnPool[s].Alive()){
+            spawnPool[s].Spawn(pos, rate, sp, dir, activate);
             return;
         }
     }
