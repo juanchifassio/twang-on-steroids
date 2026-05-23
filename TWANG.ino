@@ -259,7 +259,7 @@ void tickSoloSelect() {
     leds[getLED(900)] = CRGB(200, 200, 200);
     leds[getLED(players[0].position)] = CRGB(255, 255, 255);
 
-    if(players[0].wobble > ATTACK_THRESHOLD) {
+    if(players[0].wobble > ATTACK_THRESHOLD && millis() - stageStartTime > 500) {
         noToneAC();
         gameMode         = onClassic ? SOLO_CLASSIC : SOLO_ENDLESS;
         playerCount      = 1;
