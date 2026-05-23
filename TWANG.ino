@@ -149,6 +149,129 @@ void setup() {
     stageStartTime = millis();
 }
 
+#define POOL_SOLO    200
+#define POOL_COOP    500
+#define POOL_VERSUS  800
+#define POOL_HALF     30
+
+void drawModeSelectPools(long mm) {
+    CRGB colors[3] = {CRGB(0,255,0), CRGB(0,255,180), CRGB(180,0,255)};
+    int pools[3]   = {POOL_SOLO, POOL_COOP, POOL_VERSUS};
+    int brightness = 80 + (int)(sin(mm / 300.0) * 60.0);
+    for(int p = 0; p < 3; p++) {
+        int startLED = getLED(pools[p] - POOL_HALF);
+        int endLED   = getLED(pools[p] + POOL_HALF);
+        for(int i = startLED; i <= endLED; i++) {
+            leds[i] = colors[p];
+            leds[i].nscale8(brightness);
+        }
+    }
+}
+
+void SFXmodeSelect(int pool, long mm) {
+    int soloNotes[4]   = {440, 550, 660, 880};
+    int coopNotes[4]   = {440, 554, 440, 554};
+    int versusNotes[4] = {110, 110, 165, 110};
+    int rate = 200;
+    int* notes;
+    if(pool == 0)      { notes = soloNotes;   rate = 150; }
+    else if(pool == 1) { notes = coopNotes;   rate = 300; }
+    else               { notes = versusNotes; rate = 400; }
+    int idx = (mm / rate) % 4;
+    toneAC(notes[idx] * FREQUENCY_MULTIPLIER, MAX_VOLUME);
+}
+
+void tickModeSelect() {
+    long mm = millis();
+
+    int moveAmount = (players[0].tilt / 6.0);
+    if(DIRECTION) moveAmount = -moveAmount;
+    moveAmount = constrain(moveAmount, -MAX_PLAYER_SPEED, MAX_PLAYER_SPEED);
+    players[0].position -= moveAmount;
+    players[0].position  = constrain(players[0].position, 0, 1000);
+
+    modeSelectPool = -1;
+    if(abs(players[0].position - POOL_SOLO)   <= POOL_HALF) modeSelectPool = 0;
+    if(abs(players[0].position - POOL_COOP)   <= POOL_HALF) modeSelectPool = 1;
+    if(abs(players[0].position - POOL_VERSUS) <= POOL_HALF) modeSelectPool = 2;
+
+    if(modeSelectPool >= 0 && players[0].wobble > ATTACK_THRESHOLD) {
+        noToneAC();
+        if(modeSelectPool == 0) {
+            stage = "SOLO_SELECT";
+            stageStartTime = mm;
+        } else if(modeSelectPool == 1) {
+            gameMode           = COOP;
+            playerCount        = 2;
+            proceduralMode     = true;
+            proceduralDifficulty = 1;
+            mpu1.initialize();
+            players[0].lives   = 3;
+            players[1].lives   = 3;
+            players[1].color   = CRGB(0, 255, 180);
+            levelNumber        = 0;
+            loadLevel();
+        } else {
+            gameMode           = VERSUS;
+            playerCount        = 2;
+            proceduralMode     = true;
+            proceduralDifficulty = 2;
+            mpu1.initialize();
+            players[0].position = 0;
+            players[1].position = 1000;
+            players[1].color    = CRGB(180, 0, 255);
+            players[0].kills    = 0;
+            players[1].kills    = 0;
+            levelNumber         = 0;
+            loadLevel();
+        }
+        return;
+    }
+
+    for(int i = 0; i < NUM_LEDS; i++) leds[i].nscale8(200);
+    drawModeSelectPools(mm);
+    leds[getLED(players[0].position)] = CRGB(255, 255, 255);
+
+    if(modeSelectPool >= 0) {
+        SFXmodeSelect(modeSelectPool, mm);
+    } else {
+        noToneAC();
+    }
+
+    if(abs(players[0].tilt) > JOYSTICK_DEADZONE) lastInputTime = mm;
+    if(lastInputTime + TIMEOUT < mm) stage = "SCREENSAVER";
+}
+
+void tickSoloSelect() {
+    long mm = millis();
+
+    int moveAmount = (players[0].tilt / 6.0);
+    if(DIRECTION) moveAmount = -moveAmount;
+    moveAmount = constrain(moveAmount, -MAX_PLAYER_SPEED, MAX_PLAYER_SPEED);
+    players[0].position -= moveAmount;
+    players[0].position  = constrain(players[0].position, 0, 1000);
+
+    bool onClassic = players[0].position <= 500;
+
+    for(int i = 0; i < NUM_LEDS/2; i++) leds[i] = CRGB(0, 60, 0);
+    for(int i = NUM_LEDS/2; i < NUM_LEDS; i++) leds[i] = CRGB(50, 50, 50);
+    leds[getLED(100)] = CRGB(0, 255, 0);
+    leds[getLED(900)] = CRGB(200, 200, 200);
+    leds[getLED(players[0].position)] = CRGB(255, 255, 255);
+
+    if(players[0].wobble > ATTACK_THRESHOLD) {
+        noToneAC();
+        gameMode         = onClassic ? SOLO_CLASSIC : SOLO_ENDLESS;
+        playerCount      = 1;
+        proceduralMode   = (gameMode == SOLO_ENDLESS);
+        proceduralDifficulty = 1;
+        players[0].lives = 3;
+        players[0].position = 0;
+        levelNumber      = 0;
+        loadLevel();
+    }
+}
+
 void versusKill(int killerIndex) {
     int victimIndex = 1 - killerIndex;
     players[killerIndex].kills++;
@@ -196,15 +319,27 @@ void loop() {
         getInput();
         long frameTimer = mm;
         previousMillis = mm;
-        
-        if(abs(players[0].tilt) > JOYSTICK_DEADZONE){
+
+        if(stage == "MODE_SELECT") {
+            tickModeSelect();
+            FastLED.show();
+            previousMillis = mm;
+            return;
+        } else if(stage == "SOLO_SELECT") {
+            tickSoloSelect();
+            FastLED.show();
+            previousMillis = mm;
+            return;
+        }
+
+        if(abs(players[0].tilt) > JOYSTICK_DEADZONE) {
             lastInputTime = mm;
-            if(stage == "SCREENSAVER"){
-                levelNumber = -1;
+            if(stage == "SCREENSAVER") {
+                players[0].position = 200;
+                stage = "MODE_SELECT";
                 stageStartTime = mm;
-                stage = "WIN";
             }
-        }else{
+        } else {
             if(lastInputTime+TIMEOUT < mm){
                 stage = "SCREENSAVER";
             }
