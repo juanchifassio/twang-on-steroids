@@ -14,6 +14,7 @@
 #include "Lava.h"
 #include "Boss.h"
 #include "Conveyor.h"
+#include "ProceduralLevel.h"
 
 #include "Player.h"
 
