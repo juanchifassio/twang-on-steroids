@@ -10,6 +10,8 @@ class Enemy
     int _pos;
     int _wobble;
     int playerSide;
+    bool isMarked;
+    int ownerIndex;
   private:
     int _dir;
     int _sp;
@@ -24,6 +26,8 @@ void Enemy::Spawn(int pos, int dir, int sp, int wobble){
     _origin = pos;
     _sp = sp;
     _alive = 1;
+    isMarked = false;
+    ownerIndex = 0;
 }
 
 void Enemy::Tick(){
