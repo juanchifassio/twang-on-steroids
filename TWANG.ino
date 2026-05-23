@@ -15,26 +15,31 @@
 #include "Boss.h"
 #include "Conveyor.h"
 
-// MPU
-MPU6050 accelgyro;
-int16_t ax, ay, az;
-int16_t gx, gy, gz;
+#include "Player.h"
+
+// MPU — two sensors share I2C bus via AD0 pin
+MPU6050 mpu0(0x68);  // AD0 → GND
+MPU6050 mpu1(0x69);  // AD0 → VCC (initialized only when 2-player mode selected)
+RunningMedian angleSamples0 = RunningMedian(5);
+RunningMedian wobbleSamples0 = RunningMedian(5);
+RunningMedian angleSamples1 = RunningMedian(5);
+RunningMedian wobbleSamples1 = RunningMedian(5);
 
 // LED setup
 #define NUM_LEDS             300
 #define DATA_PIN             3
-#define CLOCK_PIN            4     
-#define LED_COLOR_ORDER      GRB   //if colours aren't working, try GRB or GBR
-#define BRIGHTNESS           150   //Use a lower value for lower current power supplies(<2 amps)
-#define DIRECTION            1     // 0 = right to left, 1 = left to right
-#define MIN_REDRAW_INTERVAL  16    // Min redraw interval (ms) 33 = 30fps / 16 = 63fps
-#define USE_GRAVITY          1     // 0/1 use gravity (LED strip going up wall)
-#define BEND_POINT           550   // 0/1000 point at which the LED strip goes up the wall
-#define LED_TYPE             WS2812B//type of LED strip to use(APA102 - DotStar, WS2811 - NeoPixel) For Neopixels, uncomment line #108 and comment out line #106 uwu
+#define CLOCK_PIN            4
+#define LED_COLOR_ORDER      GRB
+#define BRIGHTNESS           150
+#define DIRECTION            1
+#define MIN_REDRAW_INTERVAL  16
+#define USE_GRAVITY          1
+#define BEND_POINT           550
+#define LED_TYPE             WS2812B
 
 // GAME
-float FREQUENCY_MULTIPLIER = 1.0;  // Frequency multiplier for sound effects
-long previousMillis = 0;           // Time of the last redraw
+float FREQUENCY_MULTIPLIER = 1.0;
+long previousMillis = 0;
 int levelNumber = 0;
 long lastInputTime = 0;
 #define TIMEOUT              30000
@@ -42,39 +47,38 @@ long lastInputTime = 0;
 #define MAX_VOLUME           15
 iSin isin = iSin();
 
+enum GameMode { SOLO_CLASSIC, SOLO_ENDLESS, COOP, VERSUS };
+GameMode gameMode = SOLO_CLASSIC;
+int playerCount = 1;
+bool proceduralMode = false;
+int proceduralDifficulty = 1;
+
+Player players[2];
+
 // JOYSTICK
-#define JOYSTICK_ORIENTATION 1     // 0, 1 or 2 to set the angle of the joystick
-#define JOYSTICK_DIRECTION   1     // 0/1 to flip joystick direction
-#define ATTACK_THRESHOLD     30000 // The threshold that triggers an attack
-#define JOYSTICK_DEADZONE    5     // Angle to ignore
-int joystickTilt = 0;              // Stores the angle of the joystick
-int joystickWobble = 0;            // Stores the max amount of acceleration (wobble)
+#define JOYSTICK_ORIENTATION 1
+#define JOYSTICK_DIRECTION   1
+#define ATTACK_THRESHOLD     30000
+#define JOYSTICK_DEADZONE    5
 
 // WOBBLE ATTACK
-#define ATTACK_WIDTH        50     // Width of the wobble attack, world is 1000 wide
+#define ATTACK_WIDTH         50
 int NORMAL_ATTACK_DURATION = 500;
-int ATTACK_DURATION = NORMAL_ATTACK_DURATION;
-long attackMillis = 0;             // Time the attack started
-bool attacking = 0;                // Is the attack in progress?
-const unsigned long NORMAL_ATTACK_DELAY = 800;   // Set the delay to 1000 milliseconds (1 seconds), adjust as needed
-long ATTACK_DELAY = NORMAL_ATTACK_DELAY;   // Set the delay to 1000 milliseconds (1 seconds), adjust as needed
-unsigned long lastAttackTime = 0;         // Variable to store the time of the last attack
+int ATTACK_DURATION        = NORMAL_ATTACK_DURATION;
+int NORMAL_PLAYER_SPEED    = 10;
+int MAX_PLAYER_SPEED       = NORMAL_PLAYER_SPEED;
+const unsigned long NORMAL_ATTACK_DELAY = 800;
+long ATTACK_DELAY          = NORMAL_ATTACK_DELAY;
 
-#define BOSS_WIDTH          40
+#define BOSS_WIDTH 40
 
-// PLAYER
-int NORMAL_PLAYER_SPEED = 10;     // Max move speed of the player
-int MAX_PLAYER_SPEED = NORMAL_PLAYER_SPEED;  // This is the speed that the game actually uses for the player
-char* stage;                       // what stage the game is at (PLAY/DEAD/WIN/GAMEOVER)
-long stageStartTime;               // Stores the time the stage changed for stages that are time based
-int playerPosition;                // Stores the player position
-int playerPositionModifier;        // +/- adjustment to player position
-bool playerAlive;
-long killTime;
-int lives = 3;
+// SYSTEM
+char* stage;
+long stageStartTime;
+int lifeLEDs[3] = {52, 50, 40};
+int modeSelectPool = -1;
 
 // POOLS
-int lifeLEDs[3] = {52, 50, 40};
 Enemy enemyPool[10] = {
     Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy()
 };
@@ -107,31 +111,41 @@ Boss bossPool[2] = {
 int const bossCount = 2;
 
 CRGB leds[NUM_LEDS];
-RunningMedian MPUAngleSamples = RunningMedian(5);
-RunningMedian MPUWobbleSamples = RunningMedian(5);
 
 void setup() {
     Serial.begin(9600);
     while (!Serial);
-    
-    // MPU
+
     Wire.begin();
-    accelgyro.initialize();
-    
-    // Fast LED
-    //FastLED.addLeds<LED_TYPE, DATA_PIN, CLOCK_PIN, LED_COLOR_ORDER>(leds, NUM_LEDS);
-    //If using Neopixels, use
+    mpu0.initialize();
+
     FastLED.addLeds<LED_TYPE, DATA_PIN, LED_COLOR_ORDER>(leds, NUM_LEDS);
     FastLED.setBrightness(BRIGHTNESS);
     FastLED.setDither(1);
-    
-    // Life LEDs
-    for(int i = 0; i<3; i++){
+
+    for(int i = 0; i < 3; i++){
         pinMode(lifeLEDs[i], OUTPUT);
         digitalWrite(lifeLEDs[i], HIGH);
     }
-    
-    loadLevel();
+
+    players[0].mpuAddress  = 0x68;
+    players[0].color       = CRGB(0, 255, 0);
+    players[0].position    = 200;
+    players[0].alive       = true;
+    players[0].lives       = 3;
+    players[0].kills       = 0;
+    players[0].respawnAt   = 0;
+
+    players[1].mpuAddress  = 0x69;
+    players[1].color       = CRGB(0, 255, 180);
+    players[1].position    = 200;
+    players[1].alive       = true;
+    players[1].lives       = 3;
+    players[1].kills       = 0;
+    players[1].respawnAt   = 0;
+
+    stage = "MODE_SELECT";
+    stageStartTime = millis();
 }
 
 void loop() {
@@ -812,29 +826,38 @@ void screenSaverTick(){
 // ---------------------------------
 // ----------- JOYSTICK ------------
 // ---------------------------------
-void getInput(){
-    // This is responsible for the player movement speed and attacking. 
-    // You can replace it with anything you want that passes a -90>+90 value to joystickTilt
-    // and any value to joystickWobble that is greater than ATTACK_THRESHOLD (defined at start)
-    // For example you could use 3 momentery buttons:
-        // if(digitalRead(leftButtonPinNumber) == HIGH) joystickTilt = -90;
-        // if(digitalRead(rightButtonPinNumber) == HIGH) joystickTilt = 90;
-        // if(digitalRead(attackButtonPinNumber) == HIGH) joystickWobble = ATTACK_THRESHOLD;
-    
-    accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    int a = (JOYSTICK_ORIENTATION == 0?ax:(JOYSTICK_ORIENTATION == 1?ay:az))/166;
-    int g = (JOYSTICK_ORIENTATION == 0?gx:(JOYSTICK_ORIENTATION == 1?gy:gz));
-    if(abs(a) < JOYSTICK_DEADZONE) a = 0;
-    if(a > 0) a -= JOYSTICK_DEADZONE;
-    if(a < 0) a += JOYSTICK_DEADZONE;
-    MPUAngleSamples.add(a);
-    MPUWobbleSamples.add(g);
-    
-    joystickTilt = MPUAngleSamples.getMedian();
-    if(JOYSTICK_DIRECTION == 1) {
-        joystickTilt = 0-joystickTilt;
+void getInput() {
+    int16_t ax, ay, az, gx, gy, gz;
+
+    mpu0.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    {
+        int a = (JOYSTICK_ORIENTATION == 0 ? ax : (JOYSTICK_ORIENTATION == 1 ? ay : az)) / 166;
+        int g = (JOYSTICK_ORIENTATION == 0 ? gx : (JOYSTICK_ORIENTATION == 1 ? gy : gz));
+        if(abs(a) < JOYSTICK_DEADZONE) a = 0;
+        if(a > 0) a -= JOYSTICK_DEADZONE;
+        if(a < 0) a += JOYSTICK_DEADZONE;
+        angleSamples0.add(a);
+        wobbleSamples0.add(g);
+        players[0].tilt = angleSamples0.getMedian();
+        if(JOYSTICK_DIRECTION == 1) players[0].tilt = -players[0].tilt;
+        players[0].wobble = abs(wobbleSamples0.getHighest());
     }
-    joystickWobble = abs(MPUWobbleSamples.getHighest());
+
+    if(playerCount == 2) {
+        mpu1.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+        {
+            int a = (JOYSTICK_ORIENTATION == 0 ? ax : (JOYSTICK_ORIENTATION == 1 ? ay : az)) / 166;
+            int g = (JOYSTICK_ORIENTATION == 0 ? gx : (JOYSTICK_ORIENTATION == 1 ? gy : gz));
+            if(abs(a) < JOYSTICK_DEADZONE) a = 0;
+            if(a > 0) a -= JOYSTICK_DEADZONE;
+            if(a < 0) a += JOYSTICK_DEADZONE;
+            angleSamples1.add(a);
+            wobbleSamples1.add(g);
+            players[1].tilt = angleSamples1.getMedian();
+            if(JOYSTICK_DIRECTION == 1) players[1].tilt = -players[1].tilt;
+            players[1].wobble = abs(wobbleSamples1.getHighest());
+        }
+    }
 }
 
 
