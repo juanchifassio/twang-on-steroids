@@ -150,12 +150,26 @@ void setup() {
 }
 
 void versusKill(int killerIndex) {
-    // Placeholder — full implementation in Task 6
     int victimIndex = 1 - killerIndex;
     players[killerIndex].kills++;
-    players[victimIndex].position = (victimIndex == 0) ? 0 : 1000;
-    players[victimIndex].alive = true;
+
+    // Flash strip with killer color
+    for(int i = 0; i < NUM_LEDS; i++) leds[i] = players[killerIndex].color;
+    FastLED.show();
+    delay(500);
+
+    // Show kill count: pulses at each end
+    for(int i = 0; i < NUM_LEDS; i++) leds[i] = CRGB::Black;
+    for(int k = 0; k < players[0].kills; k++) leds[k] = players[0].color;
+    for(int k = 0; k < players[1].kills; k++) leds[NUM_LEDS-1-k] = players[1].color;
+    FastLED.show();
+    delay(1000);
+
+    // Respawn victim
+    players[victimIndex].position  = (victimIndex == 0) ? 0 : 1000;
+    players[victimIndex].alive     = true;
     players[victimIndex].attacking = false;
+
     if(players[killerIndex].kills >= 3) {
         stage = "WIN";
         stageStartTime = millis();
@@ -272,56 +286,30 @@ void loop() {
             drawPlayer();
             drawAttack();
             drawExit();
-        }else if(stage == "DEAD"){
-            // DEAD
-            FastLED.clear();
-            if(!tickParticles()){
+        } else if(stage == "WIN") {
+            SFXwin();
+            if(millis() - stageStartTime > 3000) {
+                if(gameMode == VERSUS) {
+                    players[0].kills = 0;
+                    players[1].kills = 0;
+                    noToneAC();
+                    stage = "MODE_SELECT";
+                    stageStartTime = millis();
+                } else {
+                    nextLevel();
+                }
+            }
+        } else if(stage == "DEAD") {
+            SFXdead();
+            if(!tickParticles()) {
                 loadLevel();
             }
-        }else if(stage == "WIN"){
-            // LEVEL COMPLETE
-            FastLED.clear();
-            if(stageStartTime+500 > mm){
-                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS, 0), 0);
-                for(int i = NUM_LEDS; i>= n; i--){
-                    brightness = 255;
-                    leds[i] = CRGB(0, brightness, 0);
-                }
-                SFXwin();
-            }else if(stageStartTime+1000 > mm){
-                int n = max(map(((mm-stageStartTime)), 500, 1000, NUM_LEDS, 0), 0);
-                for(int i = 0; i< n; i++){
-                    brightness = 255;
-                    leds[i] = CRGB(0, brightness, 0);
-                }
-                SFXwin();
-            }else if(stageStartTime+1200 > mm){
-                leds[0] = CRGB(0, 255, 0);
-            }else{
-                nextLevel();
-            }
-        }else if(stage == "COMPLETE"){
-            FastLED.clear();
+        } else if(stage == "COMPLETE") {
             SFXcomplete();
-            if(stageStartTime+500 > mm){
-                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS, 0), 0);
-                for(int i = NUM_LEDS; i>= n; i--){
-                    brightness = (sin(((i*10)+mm)/500.0)+1)*255;
-                    leds[i].setHSV(brightness, 255, 50);
-                }
-            }else if(stageStartTime+5000 > mm){
-                for(int i = NUM_LEDS; i>= 0; i--){
-                    brightness = (sin(((i*10)+mm)/500.0)+1)*255;
-                    leds[i].setHSV(brightness, 255, 50);
-                }
-            }else if(stageStartTime+5500 > mm){
-                int n = max(map(((mm-stageStartTime)), 5000, 5500, NUM_LEDS, 0), 0);
-                for(int i = 0; i< n; i++){
-                    brightness = (sin(((i*10)+mm)/500.0)+1)*255;
-                    leds[i].setHSV(brightness, 255, 50);
-                }
-            }else{
-                nextLevel();
+            if(millis() - stageStartTime > 5000) {
+                noToneAC();
+                stage = "MODE_SELECT";
+                stageStartTime = millis();
             }
         }else if(stage == "GAMEOVER"){
             // GAME OVER!
@@ -618,6 +606,7 @@ void cleanupLevel(){
 
 void levelComplete(){
     stageStartTime = millis();
+    if(proceduralMode) proceduralDifficulty++;
     stage = "WIN";
     if(levelNumber == LEVEL_COUNT) stage = "COMPLETE";
     players[0].lives = 3;
