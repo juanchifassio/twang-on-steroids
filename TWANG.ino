@@ -76,6 +76,9 @@ long ATTACK_DELAY          = NORMAL_ATTACK_DELAY;
 char* stage;
 long stageStartTime;
 int lifeLEDs[3] = {52, 50, 40};
+
+// Forward declarations
+void versusKill(int killerIndex);
 int modeSelectPool = -1;
 
 // POOLS
@@ -153,12 +156,14 @@ void loop() {
     int brightness = 0;
     
     if(stage == "PLAY"){
-        if(attacking){
+        bool anyAttacking = false;
+        for(int i = 0; i < playerCount; i++) if(players[i].attacking) anyAttacking = true;
+        if(anyAttacking) {
             SFXattacking();
-        }else{
-            SFXtilt(joystickTilt);
+        } else {
+            SFXtilt(players[0].tilt);
         }
-    }else if(stage == "DEAD"){
+    } else if(stage == "DEAD"){
         SFXdead();
     }
     
@@ -167,7 +172,7 @@ void loop() {
         long frameTimer = mm;
         previousMillis = mm;
         
-        if(abs(joystickTilt) > JOYSTICK_DEADZONE){
+        if(abs(players[0].tilt) > JOYSTICK_DEADZONE){
             lastInputTime = mm;
             if(stage == "SCREENSAVER"){
                 levelNumber = -1;
@@ -183,36 +188,69 @@ void loop() {
             screenSaverTick();
         }else if(stage == "PLAY"){
             // PLAYING
+            for(int i = 0; i < playerCount; i++) {
+                // COOP respawn
+                if(!players[i].alive) {
+                    if(gameMode == COOP && players[i].respawnAt > 0 && mm >= players[i].respawnAt) {
+                        players[i].position  = 0;
+                        players[i].alive     = true;
+                        players[i].respawnAt = 0;
+                    }
+                    continue;
+                }
 
-            if(attacking && attackMillis+ATTACK_DURATION < mm) attacking = 0;
+                // Attack timing
+                if(players[i].attacking && players[i].attackMillis + ATTACK_DURATION < mm) {
+                    players[i].attacking = false;
+                }
+                if(!players[i].attacking &&
+                   players[i].wobble > ATTACK_THRESHOLD &&
+                   mm - players[i].lastAttackTime >= (unsigned long)ATTACK_DELAY) {
+                    players[i].attackMillis    = mm;
+                    players[i].attacking       = true;
+                    players[i].lastAttackTime  = mm;
+                }
 
-            // If not attacking, check if they should be
-            if (!attacking && joystickWobble > ATTACK_THRESHOLD && millis() - lastAttackTime >= ATTACK_DELAY) {
-                attackMillis = mm;
-                attacking = 1;
-                lastAttackTime = millis();  // Update the time of the last attack
+                // Movement
+                players[i].position += players[i].positionModifier;
+                if(!players[i].attacking) {
+                    int moveAmount = (players[i].tilt / 6.0);
+                    if(DIRECTION) moveAmount = -moveAmount;
+                    moveAmount = constrain(moveAmount, -MAX_PLAYER_SPEED, MAX_PLAYER_SPEED);
+                    players[i].position -= moveAmount;
+                    if(players[i].position < 0) players[i].position = 0;
+                }
+
+                // Lava kill
+                if(inLava(players[i].position)) {
+                    die(i);
+                    return;
+                }
+
+                // VERSUS: player-vs-player attack
+                if(gameMode == VERSUS && players[i].attacking) {
+                    int other = 1 - i;
+                    if(players[other].alive &&
+                       players[other].position > players[i].position - (ATTACK_WIDTH/2) &&
+                       players[other].position < players[i].position + (ATTACK_WIDTH/2)) {
+                        versusKill(i);
+                        return;
+                    }
+                }
             }
-            
-            
-            // If still not attacking, move!
-            playerPosition += playerPositionModifier;
-            if(!attacking){
-                int moveAmount = (joystickTilt/6.0);
-                if(DIRECTION) moveAmount = -moveAmount;
-                moveAmount = constrain(moveAmount, -MAX_PLAYER_SPEED, MAX_PLAYER_SPEED);
-                playerPosition -= moveAmount;
-                if(playerPosition < 0) playerPosition = 0;
-                if(playerPosition >= 1000 && !bossPool[0].Alive() && !bossPool[1].Alive()) {
-                    // Reached exit!
+
+            // Win condition (not in VERSUS)
+            if(gameMode != VERSUS) {
+                bool exitReached = true;
+                for(int i = 0; i < playerCount; i++) {
+                    if(!players[i].alive || players[i].position < 1000) { exitReached = false; break; }
+                }
+                if(exitReached && !bossPool[0].Alive() && !bossPool[1].Alive()) {
                     levelComplete();
                     return;
                 }
             }
-            
-            if(inLava(playerPosition)){
-                die();
-            }
-            
+
             // Ticks and draw calls
             FastLED.clear();
             tickConveyors();
@@ -301,12 +339,14 @@ void loadLevel(){
     normalizeParams();
     updateLives();
     cleanupLevel();
-    playerPosition = 0;
-    playerAlive = 1;
+    players[0].position = 0;
+    players[0].alive = true;
+    players[0].positionModifier = 0;
+    players[0].attacking = false;
     switch(levelNumber){
         case 0: // Difficulty: 0/10
             // Left or right?
-            playerPosition = 200;
+            players[0].position = 200;
             spawnEnemy(1, 0, 0, 0);
             break;
         case 1: // Difficulty: 0/10
@@ -495,7 +535,7 @@ void spawnEnemy(int pos, int dir, int sp, int wobble){
     for(int e = 0; e<enemyCount; e++){
         if(!enemyPool[e].Alive()){
             enemyPool[e].Spawn(pos, dir, sp, wobble);
-            enemyPool[e].playerSide = pos > playerPosition?1:-1;
+            enemyPool[e].playerSide = pos > players[0].position ? 1 : -1;
             return;
         }
     }
@@ -544,7 +584,7 @@ void levelComplete(){
     stageStartTime = millis();
     stage = "WIN";
     if(levelNumber == LEVEL_COUNT) stage = "COMPLETE";
-    lives = 3;
+    players[0].lives = 3;
     updateLives();
 }
 
@@ -559,51 +599,97 @@ void gameOver(){
     loadLevel();
 }
 
-void die(){
-    playerAlive = 0;
-    if(levelNumber > 0) lives --;
-    updateLives();
-    if(lives == 0){
-        levelNumber = 0;
-        lives = 3;
-    }
+void die(int playerIndex) {
+    players[playerIndex].alive = false;
+    players[playerIndex].killTime = millis();
+
     for(int p = 0; p < particleCount; p++){
-        particlePool[p].Spawn(playerPosition);
+        particlePool[p].Spawn(players[playerIndex].position);
+    }
+
+    if(gameMode == VERSUS) {
+        // In versus, lava/enemy deaths just respawn at start — no kill credit
+        players[playerIndex].position = (playerIndex == 0) ? 0 : 1000;
+        players[playerIndex].alive = true;
+        players[playerIndex].attacking = false;
+        return;
+    }
+
+    if(gameMode == COOP) {
+        players[0].lives--;
+        updateLives();
+        if(players[0].lives <= 0) {
+            players[0].lives = 3;
+            noToneAC();
+            stage = "MODE_SELECT";
+            stageStartTime = millis();
+            return;
+        }
+        players[playerIndex].respawnAt = millis() + 2000;
+        return;
+    }
+
+    // SOLO_CLASSIC / SOLO_ENDLESS
+    players[playerIndex].lives--;
+    updateLives();
+    if(players[playerIndex].lives <= 0) {
+        levelNumber = 0;
+        players[playerIndex].lives = 3;
+        noToneAC();
+        stage = "MODE_SELECT";
+        stageStartTime = millis();
+        return;
     }
     stageStartTime = millis();
     stage = "DEAD";
-    killTime = millis();
 }
 
 // ----------------------------------
 // -------- TICKS & RENDERS ---------
 // ----------------------------------
 void tickEnemies(){
-    for(int i = 0; i<enemyCount; i++){
+    for(int i = 0; i < enemyCount; i++){
         if(enemyPool[i].Alive()){
             enemyPool[i].Tick();
-            // Hit attack?
-            if(attacking){
-                if(enemyPool[i]._pos > playerPosition-(ATTACK_WIDTH/2) && enemyPool[i]._pos < playerPosition+(ATTACK_WIDTH/2)){
-                   enemyPool[i].Kill();
-                   SFXkill();
+
+            // Attack kills — marked enemies only killable by their owner
+            for(int p = 0; p < playerCount; p++) {
+                if(!players[p].alive || !players[p].attacking) continue;
+                bool canKill = !enemyPool[i].isMarked || enemyPool[i].ownerIndex == p;
+                if(canKill &&
+                   enemyPool[i]._pos > players[p].position - (ATTACK_WIDTH/2) &&
+                   enemyPool[i]._pos < players[p].position + (ATTACK_WIDTH/2)) {
+                    enemyPool[i].Kill();
+                    SFXkill();
+                    break;
                 }
             }
-            if(inLava(enemyPool[i]._pos)){
+
+            if(inLava(enemyPool[i]._pos)) {
                 enemyPool[i].Kill();
                 SFXkill();
             }
-            // Draw (if still alive)
+
             if(enemyPool[i].Alive()) {
-                leds[getLED(enemyPool[i]._pos)] = CRGB(255, 0, 0);
+                CRGB eColor = CRGB(255, 0, 0);
+                if(enemyPool[i].isMarked) {
+                    eColor = (enemyPool[i].ownerIndex == 0) ? CRGB(0, 180, 0) : CRGB(0, 180, 130);
+                }
+                leds[getLED(enemyPool[i]._pos)] = eColor;
             }
-            // Hit player?
-            if(
-                (enemyPool[i].playerSide == 1 && enemyPool[i]._pos <= playerPosition) ||
-                (enemyPool[i].playerSide == -1 && enemyPool[i]._pos >= playerPosition)
-            ){
-                die();
-                return;
+
+            // Contact kill — marked enemies kill all players
+            for(int p = 0; p < playerCount; p++) {
+                if(!players[p].alive) continue;
+                if((enemyPool[i].playerSide == 1  && enemyPool[i]._pos <= players[p].position) ||
+                   (enemyPool[i].playerSide == -1 && enemyPool[i]._pos >= players[p].position)) {
+                    if(enemyPool[i].isMarked) {
+                        for(int pp = 0; pp < playerCount; pp++) die(pp);
+                    } else {
+                        die(p);
+                    }
+                    return;
+                }
             }
         }
     }
@@ -619,25 +705,28 @@ void tickBoss(){
             leds[i] %= 100;
         }
         // CHECK COLLISION
-        if(getLED(playerPosition) > getLED(bossPool[b]._pos - BOSS_WIDTH/2) && getLED(playerPosition) < getLED(bossPool[b]._pos + BOSS_WIDTH/2)){
-            die();
-            return; 
+        for(int p = 0; p < playerCount; p++) {
+            if(!players[p].alive) continue;
+            if(getLED(players[p].position) > getLED(bossPool[b]._pos - BOSS_WIDTH/2) &&
+               getLED(players[p].position) < getLED(bossPool[b]._pos + BOSS_WIDTH/2)){
+                die(p);
+                return;
+            }
         }
         // CHECK FOR ATTACK
-        if(attacking){
-            if(
-              (getLED(playerPosition+(ATTACK_WIDTH/2)) >= getLED(bossPool[b]._pos - BOSS_WIDTH/2) && getLED(playerPosition+(ATTACK_WIDTH/2)) <= getLED(bossPool[b]._pos + BOSS_WIDTH/2)) ||
-              (getLED(playerPosition-(ATTACK_WIDTH/2)) <= getLED(bossPool[b]._pos + BOSS_WIDTH/2) && getLED(playerPosition-(ATTACK_WIDTH/2)) >= getLED(bossPool[b]._pos - BOSS_WIDTH/2))
-            ){
-               bossPool[b].Hit();
-               if(bossPool[b].Alive()){
-                  moveBoss(b);
-               }else{
-                  int spawnerIndRight = b*2;
-                  int spawnerIndLeft = b*2 + 1;
-                  spawnPool[spawnerIndRight].Kill();
-                  spawnPool[spawnerIndLeft].Kill();
-               }
+        for(int p = 0; p < playerCount; p++) {
+            if(!players[p].alive || !players[p].attacking) continue;
+            if((getLED(players[p].position + (ATTACK_WIDTH/2)) >= getLED(bossPool[b]._pos - BOSS_WIDTH/2) &&
+                getLED(players[p].position + (ATTACK_WIDTH/2)) <= getLED(bossPool[b]._pos + BOSS_WIDTH/2)) ||
+               (getLED(players[p].position - (ATTACK_WIDTH/2)) <= getLED(bossPool[b]._pos + BOSS_WIDTH/2) &&
+                getLED(players[p].position - (ATTACK_WIDTH/2)) >= getLED(bossPool[b]._pos - BOSS_WIDTH/2))) {
+                bossPool[b].Hit();
+                if(bossPool[b].Alive()) {
+                    moveBoss(b);
+                } else {
+                    spawnPool[b*2].Kill();
+                    spawnPool[b*2+1].Kill();
+                }
             }
         }
       }
@@ -645,7 +734,11 @@ void tickBoss(){
 }
 
 void drawPlayer(){
-    leds[getLED(playerPosition)] = CRGB(0, 255, 0);
+    for(int i = 0; i < playerCount; i++) {
+        if(players[i].alive) {
+            leds[getLED(players[i].position)] = players[i].color;
+        }
+    }
 }
 
 void drawExit(){
@@ -713,8 +806,10 @@ bool tickParticles(){
 void tickConveyors(){
     int b, dir, n, i, ss, ee, led;
     long m = 10000+millis();
-    playerPositionModifier = 0;
-    
+
+    // Reset all player modifiers at top of function
+    for(int p = 0; p < playerCount; p++) players[p].positionModifier = 0;
+
     for(i = 0; i<conveyorCount; i++){
         if(conveyorPool[i]._alive){
             dir = conveyorPool[i]._dir;
@@ -727,21 +822,12 @@ void tickConveyors(){
                 b = (5-n)/2.0;
                 if(b > 0) leds[led] = CRGB(0, 0, b);
             }
-            
-            if(playerPosition > conveyorPool[i]._startPoint && playerPosition < conveyorPool[i]._endPoint){
-                if(dir == -1){
-                    if (MAX_PLAYER_SPEED-4 <= 0){
-                      playerPositionModifier = -1;
-                    } else {
-                      playerPositionModifier = -(MAX_PLAYER_SPEED-4);
-                    }
-                    
-                } else {
-                  if (MAX_PLAYER_SPEED-4 <= 0){
-                      playerPositionModifier = 1;
-                    } else {
-                      playerPositionModifier = (MAX_PLAYER_SPEED-4);
-                    }
+
+            for(int p = 0; p < playerCount; p++) {
+                if(players[p].position > conveyorPool[i]._startPoint &&
+                   players[p].position < conveyorPool[i]._endPoint) {
+                    int mod = (MAX_PLAYER_SPEED - 4 <= 0) ? 1 : (MAX_PLAYER_SPEED - 4);
+                    players[p].positionModifier = (dir == -1) ? -mod : mod;
                 }
             }
         }
@@ -749,20 +835,21 @@ void tickConveyors(){
 }
 
 void drawAttack(){
-    if(!attacking) return;
-    int n = map(millis() - attackMillis, 0, ATTACK_DURATION, 100, 5);
-    for(int i = getLED(playerPosition-(ATTACK_WIDTH/2))+1; i<=getLED(playerPosition+(ATTACK_WIDTH/2))-1; i++){
-        leds[i] = CRGB(0, 0, n);
+    for(int i = 0; i < playerCount; i++) {
+        if(!players[i].attacking || !players[i].alive) continue;
+        int n = map(millis() - players[i].attackMillis, 0, ATTACK_DURATION, 100, 5);
+        for(int j = getLED(players[i].position - (ATTACK_WIDTH/2)) + 1;
+                j <= getLED(players[i].position + (ATTACK_WIDTH/2)) - 1; j++){
+            leds[j] = CRGB(0, 0, n);
+        }
+        if(n > 90) {
+            leds[getLED(players[i].position)] = CRGB(255, 255, 255);
+        } else {
+            leds[getLED(players[i].position)] = players[i].color;
+        }
+        leds[getLED(players[i].position - (ATTACK_WIDTH/2))] = CRGB(n, n, 255);
+        leds[getLED(players[i].position + (ATTACK_WIDTH/2))] = CRGB(n, n, 255);
     }
-    if(n > 90) {
-        n = 255;
-        leds[getLED(playerPosition)] = CRGB(255, 255, 255);
-    }else{
-        n = 0;
-        leds[getLED(playerPosition)] = CRGB(0, 255, 0);
-    }
-    leds[getLED(playerPosition-(ATTACK_WIDTH/2))] = CRGB(n, n, 255);
-    leds[getLED(playerPosition+(ATTACK_WIDTH/2))] = CRGB(n, n, 255);
 }
 
 int getLED(int pos){
@@ -784,9 +871,9 @@ bool inLava(int pos){
 }
 
 void updateLives(){
-    // Updates the life LEDs to show how many lives the player has left
-    for(int i = 0; i<3; i++){
-       digitalWrite(lifeLEDs[i], lives>i?HIGH:LOW);
+    int l = players[0].lives;
+    for(int i = 0; i < 3; i++){
+        digitalWrite(lifeLEDs[i], l > i ? HIGH : LOW);
     }
 }
 
@@ -864,10 +951,10 @@ void getInput() {
 // ---------------------------------
 // -------------- SFX --------------
 // ---------------------------------
-void SFXtilt(int amount){ 
+void SFXtilt(int amount){
     int f = map(abs(amount), 0, 90, 80, 900)+random8(100);
-    if(playerPositionModifier < 0) f -= 500;
-    if(playerPositionModifier > 0) f += 200;
+    if(players[0].positionModifier < 0) f -= 500;
+    if(players[0].positionModifier > 0) f += 200;
     toneAC(f * FREQUENCY_MULTIPLIER, min(min(abs(amount)/9, 5), MAX_VOLUME));
 }
 
@@ -880,9 +967,8 @@ void SFXattacking(){
 }
 
 void SFXdead(){
-    int freq = max(1000 - (millis()-killTime), 10);
+    int freq = max(1000 - (int)(millis() - players[0].killTime), 10);
     freq += random8(200);
-    int vol = max(10 - (millis()-killTime)/200, 0);
     toneAC(freq * FREQUENCY_MULTIPLIER, MAX_VOLUME);
 }
 
