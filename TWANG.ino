@@ -77,8 +77,6 @@ char* stage;
 long stageStartTime;
 int lifeLEDs[3] = {52, 50, 40};
 
-// Forward declarations
-void versusKill(int killerIndex);
 int modeSelectPool = -1;
 
 // POOLS
@@ -149,6 +147,19 @@ void setup() {
 
     stage = "MODE_SELECT";
     stageStartTime = millis();
+}
+
+void versusKill(int killerIndex) {
+    // Placeholder — full implementation in Task 6
+    int victimIndex = 1 - killerIndex;
+    players[killerIndex].kills++;
+    players[victimIndex].position = (victimIndex == 0) ? 0 : 1000;
+    players[victimIndex].alive = true;
+    players[victimIndex].attacking = false;
+    if(players[killerIndex].kills >= 3) {
+        stage = "WIN";
+        stageStartTime = millis();
+    }
 }
 
 void loop() {
@@ -339,10 +350,14 @@ void loadLevel(){
     normalizeParams();
     updateLives();
     cleanupLevel();
+    for(int i = 0; i < playerCount; i++) {
+        players[i].alive = true;
+        players[i].attacking = false;
+        players[i].positionModifier = 0;
+        players[i].respawnAt = 0;
+    }
     players[0].position = 0;
-    players[0].alive = true;
-    players[0].positionModifier = 0;
-    players[0].attacking = false;
+    players[1].position = (gameMode == VERSUS) ? 1000 : 0;
     switch(levelNumber){
         case 0: // Difficulty: 0/10
             // Left or right?
@@ -603,8 +618,10 @@ void die(int playerIndex) {
     players[playerIndex].alive = false;
     players[playerIndex].killTime = millis();
 
-    for(int p = 0; p < particleCount; p++){
-        particlePool[p].Spawn(players[playerIndex].position);
+    if(gameMode == SOLO_CLASSIC || gameMode == SOLO_ENDLESS) {
+        for(int p = 0; p < particleCount; p++){
+            particlePool[p].Spawn(players[playerIndex].position);
+        }
     }
 
     if(gameMode == VERSUS) {
@@ -684,7 +701,11 @@ void tickEnemies(){
                 if((enemyPool[i].playerSide == 1  && enemyPool[i]._pos <= players[p].position) ||
                    (enemyPool[i].playerSide == -1 && enemyPool[i]._pos >= players[p].position)) {
                     if(enemyPool[i].isMarked) {
-                        for(int pp = 0; pp < playerCount; pp++) die(pp);
+                        die(0); // marked enemy kills — costs 1 shared life, kills all visually
+                        if(playerCount == 2 && players[1].alive) {
+                            players[1].alive = false;
+                            players[1].respawnAt = millis() + 2000;
+                        }
                     } else {
                         die(p);
                     }
