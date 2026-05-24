@@ -23,7 +23,7 @@ static void _trySpawnLava(int left, int right, int ontime, int offtime, int offs
     _lavaTotal += (right - left);
 }
 
-void generateLevel(int difficulty, bool coopMode) {
+inline void generateLevel(int difficulty, bool coopMode) {
     _lavaTotal = 0;
     int tier = constrain(difficulty / 4 + 1, 1, 4);
 
@@ -83,7 +83,7 @@ void generateLevel(int difficulty, bool coopMode) {
             }
 
         } else { // tier 4
-            if(roll < 20 && z == 4) {
+            if(z == 4) {
                 spawnBoss(0, 800);
             } else if(roll < 45) {
                 int lw = zs + random(10);
