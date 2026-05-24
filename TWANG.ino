@@ -481,7 +481,20 @@ void loadLevel(){
         players[i].respawnAt = 0;
     }
     players[0].position = 0;
-    players[1].position = (gameMode == VERSUS) ? 1000 : 0;
+    if(gameMode == VERSUS) {
+        players[1].position = 1000;
+    } else {
+        players[1].position = 0;
+    }
+
+    if(proceduralMode) {
+        randomSeed(millis());
+        generateLevel(proceduralDifficulty, gameMode == COOP);
+        stage          = "PLAY";
+        stageStartTime = millis();
+        return;
+    }
+
     switch(levelNumber){
         case 0: // Difficulty: 0/10
             // Left or right?
