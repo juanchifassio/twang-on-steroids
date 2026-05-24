@@ -11,13 +11,11 @@
       "attrs": {}
     },
     {
-      "type": "wokwi-neopixel-strip",
+      "type": "wokwi-led-strip",
       "id": "leds",
       "top": 0,
       "left": 0,
-      "attrs": {
-        "numPixels": "50"
-      }
+      "attrs": { "pixels": "50" }
     },
     {
       "type": "wokwi-mpu6050",
