@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "author": "juanchifassio",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-arduino-mega",
+      "id": "mega",
+      "top": 250,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-neopixel-strip",
+      "id": "leds",
+      "top": 0,
+      "left": 0,
+      "attrs": {
+        "numPixels": "300",
+        "colorOrder": "GRB"
+      }
+    },
+    {
+      "type": "wokwi-mpu6050",
+      "id": "mpu0",
+      "top": 250,
+      "left": 700,
+      "attrs": {
+        "addr": "0x68",
+        "label": "Player 1 (AD0→GND)"
+      }
+    },
+    {
+      "type": "wokwi-mpu6050",
+      "id": "mpu1",
+      "top": 450,
+      "left": 700,
+      "attrs": {
+        "addr": "0x69",
+        "label": "Player 2 (AD0→VCC)"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "life0",
+      "top": 250,
+      "left": 1000,
+      "attrs": { "color": "red", "label": "Life 1" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r0",
+      "top": 300,
+      "left": 1000,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "life1",
+      "top": 370,
+      "left": 1000,
+      "attrs": { "color": "red", "label": "Life 2" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 420,
+      "left": 1000,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "life2",
+      "top": 490,
+      "left": 1000,
+      "attrs": { "color": "red", "label": "Life 3" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r2",
+      "top": 540,
+      "left": 1000,
+      "attrs": { "value": "220" }
+    }
+  ],
+  "connections": [
+    ["leds:DIN", "mega:3", "green", []],
+    ["leds:VCC", "mega:5V", "red", []],
+    ["leds:GND", "mega:GND.1", "black", []],
+
+    ["mpu0:VCC", "mega:5V", "red", []],
+    ["mpu0:GND", "mega:GND.2", "black", []],
+    ["mpu0:SDA", "mega:20", "blue", []],
+    ["mpu0:SCL", "mega:21", "purple", []],
+    ["mpu0:AD0", "mega:GND.3", "black", []],
+
+    ["mpu1:VCC", "mega:5V", "red", []],
+    ["mpu1:GND", "mega:GND.2", "black", []],
+    ["mpu1:SDA", "mega:20", "blue", []],
+    ["mpu1:SCL", "mega:21", "purple", []],
+    ["mpu1:AD0", "mega:5V", "red", []],
+
+    ["mega:52", "r0:1", "orange", []],
+    ["r0:2", "life0:A", "orange", []],
+    ["life0:K", "mega:GND.4", "black", []],
+
+    ["mega:50", "r1:1", "orange", []],
+    ["r1:2", "life1:A", "orange", []],
+    ["life1:K", "mega:GND.5", "black", []],
+
+    ["mega:40", "r2:1", "orange", []],
+    ["r2:2", "life2:A", "orange", []],
+    ["life2:K", "mega:GND.6", "black", []]
+  ]
+}
