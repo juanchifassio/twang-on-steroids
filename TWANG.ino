@@ -27,7 +27,7 @@ RunningMedian angleSamples1 = RunningMedian(5);
 RunningMedian wobbleSamples1 = RunningMedian(5);
 
 // LED setup
-#define NUM_LEDS             300
+#define NUM_LEDS             50   // 300 for hardware, 50 for Wokwi simulation
 #define DATA_PIN             3
 #define CLOCK_PIN            4
 #define LED_COLOR_ORDER      GRB
